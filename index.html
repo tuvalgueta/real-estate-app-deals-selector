@@ -85,7 +85,8 @@
             area: 'שטח אקוויוולנטי',
             year: 'שנת בניה',
             floor: 'קומה',
-            parking: 'חניה'
+            parking: 'חניה',
+            address: 'כתובת' // New: Added address
         };
         
         // Column names in the "Deals" sheet
@@ -93,11 +94,68 @@
             area: 'שטח ברוטו', // Comparing Equivalent Area to Gross Area
             year: 'שנת בניה',
             floor: 'קומה',
-            parking: 'חניות'
+            parking: 'חניות',
+            address: 'כתובת',      // New: Added address
+            date: 'יום מכירה'      // New: Added date
         };
         
         const NEW_COLUMN_NAME = 'ציון דמיון';
         // ------------------------------------------
+
+        /**
+         * Safely parses floor values, converting 'ק' (Ground) to 0.
+         */
+        function parseFloor(floorValue) {
+            if (typeof floorValue === 'number') {
+                return floorValue;
+            }
+            if (!floorValue) {
+                return 0; // Treat empty/null/undefined as 0
+            }
+            
+            // Trim whitespace and check for 'ק'
+            const strFloor = String(floorValue).trim();
+            
+            if (strFloor === 'ק') {
+                return 0; // "ק" (קרקע) is ground floor (0)
+            }
+            
+            // Try to parse as a number
+            const num = parseInt(strFloor, 10);
+            
+            // If parsing fails (e.g., "מרתף"), return 0. Otherwise, return the number.
+            // --- FIX: Added missing return statement and closing brace ---
+            return isNaN(num) ? 0 : num;
+        }
+
+        /**
+         * Safely parses date strings (e.g., "dd/mm/yyyy") or Date objects.
+         */
+        function parseDate(dateInput) {
+            // New: Check if it's already a valid Date object
+            if (dateInput instanceof Date && !isNaN(dateInput)) {
+                return dateInput;
+            }
+            
+            // If not, try to parse it as a string
+            if (typeof dateInput !== 'string') return null;
+            
+            // Check for "dd/mm/yyyy" format
+            // --- FIX: Changed dateStr to dateInput ---
+            const parts = dateInput.split('/');
+            if (parts.length === 3) {
+                const day = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
+                const year = parseInt(parts[2], 10);
+                if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                    return new Date(year, month, day);
+                }
+            }
+            
+            // Fallback for other formats (like ISO yyyy-mm-dd)
+            const parsed = new Date(dateInput);
+            return isNaN(parsed) ? null : parsed;
+        }
 
         // Attach event listener to the button
         processButton.addEventListener('click', handleFileProcess);
@@ -161,7 +219,9 @@
                 reader.onload = (e) => {
                     try {
                         const data = new Uint8Array(e.target.result);
-                        const workbook = XLSX.read(data, { type: 'array' });
+                        // --- IMPORTANT: Set cellDates: true to force date parsing ---
+                        // This will read date-formatted numbers as JS Date objects.
+                        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
                         resolve(workbook);
                     } catch (err) {
                         reject(new Error('שגיאה בקריאת הקובץ. ודא שזהו קובץ אקסל תקין.'));
@@ -191,12 +251,14 @@
 
                 if (key === COMP_KEYS.area) prop.area = parseFloat(value);
                 if (key === COMP_KEYS.year) prop.year = parseInt(value, 10);
-                if (key === COMP_KEYS.floor) prop.floor = parseInt(value, 10);
+                if (key === COMP_KEYS.floor) prop.floor = parseFloor(value);
                 if (key === COMP_KEYS.parking) prop.parking = parseInt(value, 10);
+                if (key === COMP_KEYS.address) prop.address = String(value || '').trim(); // New
             });
 
             // Validate that we found all keys
-            if (!prop.area || !prop.year || prop.floor === undefined || prop.parking === undefined) {
+            const missingKeys = Object.keys(COMP_KEYS).filter(key => prop[COMP_KEYS[key]] === undefined);
+            if (!prop.area || !prop.year || prop.floor === undefined || prop.parking === undefined || !prop.address) {
                 console.warn('Data found:', prop);
                 throw new Error(`לא כל הנתונים נמצאו בגליון "${COMPARISON_SHEET_NAME}". ודא שהשמות: ${Object.values(COMP_KEYS).join(', ')} קיימים בעמודה A והערכים בעמודה B.`);
             }
@@ -217,6 +279,7 @@
             }
 
             // The header is on the 3rd row (index 2). 'range: 2' tells SheetJS to start there.
+            // We now use default options to let the JS Date objects (from cellDates:true) pass through.
             const deals = XLSX.utils.sheet_to_json(sheet, { range: 2 });
             
             if (deals.length === 0) {
@@ -225,7 +288,8 @@
             
             // Check if required columns exist in the first deal
             const firstDeal = deals[0];
-            const requiredCols = [DEAL_COLS.area, DEAL_COLS.year, DEAL_COLS.floor, DEAL_COLS.parking];
+            // New: Added address and date to required list
+            const requiredCols = [DEAL_COLS.area, DEAL_COLS.year, DEAL_COLS.floor, DEAL_COLS.parking, DEAL_COLS.address, DEAL_COLS.date];
             for (const col of requiredCols) {
                 if (!(col in firstDeal)) {
                     throw new Error(`העמודה "${col}" חסרה בגליון "${DEALS_SHEET_NAME}".`);
@@ -240,48 +304,72 @@
          * A *lower* score means a *better* match.
          */
         function calculateScores(prop, deals) {
-            // Define weights for each category (must sum to 1)
+            // New: Added today's date for date scoring
+            const today = new Date();
+            
+            // New: Updated weights. Date is highest. Sum must be 1.
             const weights = {
-                area: 0.4,
-                year: 0.2,
-                floor: 0.2,
-                parking: 0.2
+                date: 0.40,
+                area: 0.25,
+                year: 0.15,
+                floor: 0.10,
+                parking: 0.10
             };
+            
+            const propAddress = (prop.address || "").trim(); // Get comparison address once
 
             return deals.map(deal => {
-                // Get deal values, providing defaults (e.g., 0) if empty
+                // --- Get deal values ---
                 const dealArea = parseFloat(deal[DEAL_COLS.area] || 0);
                 const dealYear = parseInt(deal[DEAL_COLS.year] || 0, 10);
-                const dealFloor = parseInt(deal[DEAL_COLS.floor] || 0, 10);
+                const dealFloor = parseFloor(deal[DEAL_COLS.floor]);
                 const dealParking = parseInt(deal[DEAL_COLS.parking] || 0, 10);
                 const dealHasParking = dealParking > 0;
-
+                const dealAddress = (deal[DEAL_COLS.address] || "").trim(); // New
+                const dealDate = parseDate(deal[DEAL_COLS.date]); // New
+                
                 // --- Calculate individual scores (0-100 scale, 0 is perfect match) ---
                 
-                // Area Score: Percentage difference, capped at 100
-                // (e.g., 50% difference = 100 points)
+                // New: Date Score
+                // 0 points for today, 100 points for 10 years ago (3650 days)
+                let dateScore = 100; // Max penalty by default
+                if (dealDate) {
+                    const diffTime = Math.abs(today - dealDate);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    // (diffDays / 36.5) gives ~100 points for 10 years
+                    dateScore = Math.min(100, diffDays / 36.5);
+                }
+
+                // Area Score: (e.g., 50% difference = 100 points)
                 const areaScore = prop.area > 0 ? Math.min(100, (Math.abs(dealArea - prop.area) / prop.area) * 200) : (dealArea > 0 ? 100 : 0);
                 
-                // Year Score: 5 points per year difference, capped at 100
-                // (e.g., 20 years difference = 100 points)
+                // Year Score: (e.g., 20 years difference = 100 points)
                 const yearScore = Math.min(100, Math.abs(dealYear - prop.year) * 5);
                 
-                // Floor Score: 25 points per floor difference, capped at 100
-                // (e.g., 4 floors difference = 100 points)
+                // Floor Score: (e.g., 4 floors difference = 100 points)
                 const floorScore = Math.min(100, Math.abs(dealFloor - prop.floor) * 25);
                 
-                // Parking Score: 100 if mismatch (one has parking, one doesn't), 0 if match
+                // Parking Score: 100 if mismatch, 0 if match
                 const parkingScore = (dealHasParking !== prop.hasParking) ? 100 : 0;
 
                 // --- Calculate final weighted score ---
-                const totalScore = (areaScore * weights.area) +
+                const totalScore = (dateScore * weights.date) +
+                                   (areaScore * weights.area) +
                                    (yearScore * weights.year) +
                                    (floorScore * weights.floor) +
                                    (parkingScore * weights.parking);
 
+                // --- New: Apply Address Bonus ---
+                let bonusPoints = 0;
+                if (dealAddress && propAddress && dealAddress === propAddress) {
+                    bonusPoints = 25; // A 25-point bonus for exact address match
+                }
+                
+                const finalScore = totalScore - bonusPoints;
+
                 // Add the new score to the deal object
-                // We round to 2 decimal places for cleanliness
-                deal[NEW_COLUMN_NAME] = parseFloat(totalScore.toFixed(2));
+                // Ensure score is not negative after bonus
+                deal[NEW_COLUMN_NAME] = parseFloat(Math.max(0, finalScore).toFixed(2));
                 
                 return deal;
             });
@@ -297,9 +385,37 @@
             // Get the top 7 deals
             const top7Deals = scoredDeals.slice(0, 7);
             
-            // Create new worksheets
-            const ws_top7 = XLSX.utils.json_to_sheet(top7Deals);
-            const ws_all_scored = XLSX.utils.json_to_sheet(scoredDeals);
+            // --- NEW: Format dates back to dd/mm/yyyy strings for Excel ---
+            // Helper function to format Date objects
+            const formatDate = (dateInput) => {
+                if (dateInput instanceof Date && !isNaN(dateInput)) {
+                    const day = String(dateInput.getDate()).padStart(2, '0');
+                    const month = String(dateInput.getMonth() + 1).padStart(2, '0'); // +1 because months are 0-indexed
+                    const year = dateInput.getFullYear();
+                    return `${day}/${month}/${year}`;
+                }
+                // If it's not a date (e.g., it was a number we failed to parse or just text), return it as-is
+                return dateInput; 
+            };
+            
+            // Apply formatting to both lists by creating new arrays
+            const formattedTop7 = top7Deals.map(deal => ({
+                ...deal,
+                [DEAL_COLS.date]: formatDate(deal[DEAL_COLS.date])
+            }));
+            const formattedAllScored = scoredDeals.map(deal => ({
+                ...deal,
+                [DEAL_COLS.date]: formatDate(deal[DEAL_COLS.date])
+            }));
+
+            // Create new worksheets from the *formatted* data
+            // We use cellDates: false to ensure our new strings are treated as strings
+            const ws_top7 = XLSX.utils.json_to_sheet(formattedTop7, { cellDates: false });
+            const ws_all_scored = XLSX.utils.json_to_sheet(formattedAllScored, { cellDates: false });
+            
+            // Set new sheets to RTL
+            ws_top7['!props'] = { rtl: true };
+            ws_all_scored['!props'] = { rtl: true };
             
             // Create a new workbook
             const newWorkbook = XLSX.utils.book_new();
@@ -336,3 +452,4 @@
     </script>
 </body>
 </html>
+
