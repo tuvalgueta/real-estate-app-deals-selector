@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מנתח עסקאות נדל"ן</title>
+    <!-- 1. Include Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. Include SheetJS (xlsx.full.min.js) for reading/writing Excel files -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        /* Use Inter font */
+        body {
+            font-family: "Inter", sans-serif;
+        }
+        /* Simple spinner animation */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #09f;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
+        
+        <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">מנתח דמיון עסקאות נדל"ן</h2>
+        
+        <p class="text-center text-gray-600 mb-6">
+            העלה קובץ אקסל (במבנה הנדרש) כדי לקבל ניתוח של 7 העסקאות הדומות ביותר לנכס ההשוואה.
+        </p>
+
+        <!-- File Input -->
+        <div class="mb-4">
+            <label for="file-upload" class="block text-sm font-medium text-gray-700 mb-2">בחר קובץ אקסל:</label>
+            <input id="file-upload" type="file"
+                   accept=".xlsx, .xls"
+                   class="block w-full text-sm text-gray-500
+                          file:mr-4 file:ml-4 file:py-2 file:px-4
+                          file:rounded-lg file:border-0 file:text-sm file:font-semibold
+                          file:bg-blue-50 file:text-blue-700
+                          hover:file:bg-blue-100 cursor-pointer border rounded-lg p-2.5">
+        </div>
+
+        <!-- Process Button -->
+        <button id="process-button" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 transition duration-300">
+            נתח וסנן עסקאות
+        </button>
+
+        <!-- Loader (hidden by default) -->
+        <div id="loader" class="flex justify-center items-center mt-6 hidden">
+            <div class="spinner"></div>
+            <span class="mr-4 text-gray-700">מעבד נתונים...</span>
+        </div>
+
+        <!-- Message Area -->
+        <div id="message" class="mt-4 text-center text-sm font-medium"></div>
+
+    </div>
+
+    <script>
+        // Get DOM elements
+        const fileInput = document.getElementById('file-upload');
+        const processButton = document.getElementById('process-button');
+        const messageEl = document.getElementById('message');
+        const loader = document.getElementById('loader');
+
+        // --- Configuration: Sheet and Key Names ---
+        // These MUST match the names in your Excel file
+        const COMPARISON_SHEET_NAME = 'נכס השוואה';
+        const DEALS_SHEET_NAME = 'עסקאות נדל"ן';
+        
+        // Key names in the "Comparison" sheet
+        const COMP_KEYS = {
+            area: 'שטח אקוויוולנטי',
+            year: 'שנת בניה',
+            floor: 'קומה',
+            parking: 'חניה'
+        };
+        
+        // Column names in the "Deals" sheet
+        const DEAL_COLS = {
+            area: 'שטח ברוטו', // Comparing Equivalent Area to Gross Area
+            year: 'שנת בניה',
+            floor: 'קומה',
+            parking: 'חניות'
+        };
+        
+        const NEW_COLUMN_NAME = 'ציון דמיון';
+        // ------------------------------------------
+
+        // Attach event listener to the button
+        processButton.addEventListener('click', handleFileProcess);
+
+        /**
+         * Main function to handle file processing
+         */
+        async function handleFileProcess() {
+            const file = fileInput.files[0];
+
+            // Reset UI
+            messageEl.textContent = '';
+            messageEl.className = 'mt-4 text-center text-sm font-medium';
+            loader.classList.remove('hidden');
+            processButton.classList.add('hidden');
+
+            if (!file) {
+                showError("אנא בחר קובץ.");
+                resetUI();
+                return;
+            }
+
+            try {
+                // 1. Read the workbook
+                messageEl.textContent = 'קורא קובץ...';
+                const workbook = await readWorkbook(file);
+
+                // 2. Extract the comparison property data
+                messageEl.textContent = 'מחלץ נכס להשוואה...';
+                const comparisonProp = extractComparisonProperty(workbook);
+
+                // 3. Extract the deals data
+                messageEl.textContent = 'מחלץ עסקאות...';
+                const deals = extractDeals(workbook);
+
+                // 4. Calculate similarity scores
+                messageEl.textContent = 'מחשב ציוני דמיון...';
+                const scoredDeals = calculateScores(comparisonProp, deals);
+
+                // 5. Generate and download the new workbook
+                messageEl.textContent = 'יוצר קובץ חדש...';
+                generateNewWorkbook(scoredDeals, workbook.Sheets[COMPARISON_SHEET_NAME]);
+                
+                showSuccess('הקובץ נוצר והורד בהצלחה!');
+
+            } catch (error) {
+                console.error(error);
+                showError(error.message);
+            } finally {
+                // Reset UI
+                resetUI();
+            }
+        }
+
+        /**
+         * Reads the uploaded file into a SheetJS workbook object
+         */
+        function readWorkbook(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        resolve(workbook);
+                    } catch (err) {
+                        reject(new Error('שגיאה בקריאת הקובץ. ודא שזהו קובץ אקסל תקין.'));
+                    }
+                };
+                reader.onerror = (err) => reject(new Error('שגיאה בטעינת הקובץ.'));
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        /**
+         * Extracts the key data points from the comparison property sheet
+         */
+        function extractComparisonProperty(workbook) {
+            const sheet = workbook.Sheets[COMPARISON_SHEET_NAME];
+            if (!sheet) {
+                throw new Error(`הגיליון "${COMPARISON_SHEET_NAME}" לא נמצא בקובץ.`);
+            }
+            
+            // Read as array of arrays to find key-value pairs
+            const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+            const prop = {};
+
+            data.forEach(row => {
+                const key = row[0]; // Key is in the first column
+                const value = row[1]; // Value is in the second column
+
+                if (key === COMP_KEYS.area) prop.area = parseFloat(value);
+                if (key === COMP_KEYS.year) prop.year = parseInt(value, 10);
+                if (key === COMP_KEYS.floor) prop.floor = parseInt(value, 10);
+                if (key === COMP_KEYS.parking) prop.parking = parseInt(value, 10);
+            });
+
+            // Validate that we found all keys
+            if (!prop.area || !prop.year || prop.floor === undefined || prop.parking === undefined) {
+                console.warn('Data found:', prop);
+                throw new Error(`לא כל הנתונים נמצאו בגליון "${COMPARISON_SHEET_NAME}". ודא שהשמות: ${Object.values(COMP_KEYS).join(', ')} קיימים בעמודה A והערכים בעמודה B.`);
+            }
+            
+            // Convert parking to a boolean (has parking or not) for simpler comparison
+            prop.hasParking = prop.parking > 0;
+            
+            return prop;
+        }
+
+        /**
+         * Extracts the list of deals from the deals sheet
+         */
+        function extractDeals(workbook) {
+            const sheet = workbook.Sheets[DEALS_SHEET_NAME];
+            if (!sheet) {
+                throw new Error(`הגיליון "${DEALS_SHEET_NAME}" לא נמצא בקובץ.`);
+            }
+
+            // The header is on the 3rd row (index 2). 'range: 2' tells SheetJS to start there.
+            const deals = XLSX.utils.sheet_to_json(sheet, { range: 2 });
+            
+            if (deals.length === 0) {
+                throw new Error('לא נמצאו עסקאות בגיליון.');
+            }
+            
+            // Check if required columns exist in the first deal
+            const firstDeal = deals[0];
+            const requiredCols = [DEAL_COLS.area, DEAL_COLS.year, DEAL_COLS.floor, DEAL_COLS.parking];
+            for (const col of requiredCols) {
+                if (!(col in firstDeal)) {
+                    throw new Error(`העמודה "${col}" חסרה בגליון "${DEALS_SHEET_NAME}".`);
+                }
+            }
+
+            return deals;
+        }
+
+        /**
+         * Calculates a similarity score for each deal against the comparison property
+         * A *lower* score means a *better* match.
+         */
+        function calculateScores(prop, deals) {
+            // Define weights for each category (must sum to 1)
+            const weights = {
+                area: 0.4,
+                year: 0.2,
+                floor: 0.2,
+                parking: 0.2
+            };
+
+            return deals.map(deal => {
+                // Get deal values, providing defaults (e.g., 0) if empty
+                const dealArea = parseFloat(deal[DEAL_COLS.area] || 0);
+                const dealYear = parseInt(deal[DEAL_COLS.year] || 0, 10);
+                const dealFloor = parseInt(deal[DEAL_COLS.floor] || 0, 10);
+                const dealParking = parseInt(deal[DEAL_COLS.parking] || 0, 10);
+                const dealHasParking = dealParking > 0;
+
+                // --- Calculate individual scores (0-100 scale, 0 is perfect match) ---
+                
+                // Area Score: Percentage difference, capped at 100
+                // (e.g., 50% difference = 100 points)
+                const areaScore = prop.area > 0 ? Math.min(100, (Math.abs(dealArea - prop.area) / prop.area) * 200) : (dealArea > 0 ? 100 : 0);
+                
+                // Year Score: 5 points per year difference, capped at 100
+                // (e.g., 20 years difference = 100 points)
+                const yearScore = Math.min(100, Math.abs(dealYear - prop.year) * 5);
+                
+                // Floor Score: 25 points per floor difference, capped at 100
+                // (e.g., 4 floors difference = 100 points)
+                const floorScore = Math.min(100, Math.abs(dealFloor - prop.floor) * 25);
+                
+                // Parking Score: 100 if mismatch (one has parking, one doesn't), 0 if match
+                const parkingScore = (dealHasParking !== prop.hasParking) ? 100 : 0;
+
+                // --- Calculate final weighted score ---
+                const totalScore = (areaScore * weights.area) +
+                                   (yearScore * weights.year) +
+                                   (floorScore * weights.floor) +
+                                   (parkingScore * weights.parking);
+
+                // Add the new score to the deal object
+                // We round to 2 decimal places for cleanliness
+                deal[NEW_COLUMN_NAME] = parseFloat(totalScore.toFixed(2));
+                
+                return deal;
+            });
+        }
+
+        /**
+         * Generates a new workbook with the top 7 deals and all scored deals
+         */
+        function generateNewWorkbook(scoredDeals, comparisonSheet) {
+            // Sort deals by score, ascending (lowest score is best)
+            scoredDeals.sort((a, b) => a[NEW_COLUMN_NAME] - b[NEW_COLUMN_NAME]);
+
+            // Get the top 7 deals
+            const top7Deals = scoredDeals.slice(0, 7);
+            
+            // Create new worksheets
+            const ws_top7 = XLSX.utils.json_to_sheet(top7Deals);
+            const ws_all_scored = XLSX.utils.json_to_sheet(scoredDeals);
+            
+            // Create a new workbook
+            const newWorkbook = XLSX.utils.book_new();
+
+            // Append the new sheets
+            XLSX.utils.book_append_sheet(newWorkbook, ws_top7, "Top 7 Deals");
+            XLSX.utils.book_append_sheet(newWorkbook, ws_all_scored, "All Scored Deals");
+            
+            // Append the original comparison sheet for reference
+            XLSX.utils.book_append_sheet(newWorkbook, comparisonSheet, COMPARISON_SHEET_NAME);
+
+            // Trigger the download
+            XLSX.writeFile(newWorkbook, "Scored_Real_Estate_Deals.xlsx");
+        }
+        
+        // --- UI Helper Functions ---
+
+        function showError(message) {
+            messageEl.textContent = message;
+            messageEl.className = 'mt-4 text-center text-sm font-medium text-red-600';
+        }
+        
+        function showSuccess(message) {
+            messageEl.textContent = message;
+            messageEl.className = 'mt-4 text-center text-sm font-medium text-green-600';
+        }
+
+        function resetUI() {
+            loader.classList.add('hidden');
+            processButton.classList.remove('hidden');
+            fileInput.value = ''; // Clear the file input
+        }
+
+    </script>
+</body>
+</html>
