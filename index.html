@@ -427,8 +427,14 @@
             //ws_top7['!props'] = { rtl: true };
             //ws_all_scored['!props'] = { rtl: true };
             // Force RTL sheet direction (same as Excel's "Sheet Right-to-Left")
-            ws_top7['!views'] = [{ rightToLeft: true }];
-            ws_all_scored['!views'] = [{ rightToLeft: true }];
+            //ws_top7['!views'] = [{ rightToLeft: true }];
+            //ws_all_scored['!views'] = [{ rightToLeft: true }];
+            // Force RTL via raw XML
+            ws_top7['!views'] = [{ rightToLeft: 1 }];
+            ws_top7['!sheetView'] = '<sheetView rightToLeft="1"/>';  // ← This works
+            ws_all_scored['!views'] = [{ rightToLeft: 1 }];
+            ws_all_scored['!sheetView'] = '<sheetView rightToLeft="1"/>';
+            
             // Create a new workbook
             const newWorkbook = XLSX.utils.book_new();
 
