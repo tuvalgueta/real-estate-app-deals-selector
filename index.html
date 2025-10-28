@@ -387,6 +387,7 @@
             
             // --- NEW: Format dates back to dd/mm/yyyy strings for Excel ---
             // Helper function to format Date objects
+            /*
             const formatDate = (dateInput) => {
                 if (dateInput instanceof Date && !isNaN(dateInput)) {
                     const day = String(dateInput.getDate()).padStart(2, '0');
@@ -396,6 +397,11 @@
                 }
                 // If it's not a date (e.g., it was a number we failed to parse or just text), return it as-is
                 return dateInput; 
+            };
+            */
+            // Apply REAL date formatting to the 'יום מכירה' column
+            const formatDate = (dateInput) => {
+            return dateInput instanceof Date && !isNaN(dateInput) ? dateInput : null;
             };
             
             // Apply formatting to both lists by creating new arrays
@@ -410,8 +416,12 @@
 
             // Create new worksheets from the *formatted* data
             // We use cellDates: false to ensure our new strings are treated as strings
-            const ws_top7 = XLSX.utils.json_to_sheet(formattedTop7, { cellDates: false });
-            const ws_all_scored = XLSX.utils.json_to_sheet(formattedAllScored, { cellDates: false });
+            //old can remove if works
+            //const ws_top7 = XLSX.utils.json_to_sheet(formattedTop7, { cellDates: false });
+            //const ws_all_scored = XLSX.utils.json_to_sheet(formattedAllScored, { cellDates: false });
+            
+            const ws_top7 = XLSX.utils.json_to_sheet(formattedTop7, { cellDates: true });
+            const ws_all_scored = XLSX.utils.json_to_sheet(formattedAllScored, { cellDates: true });            
             
             // Set new sheets to RTL
             ws_top7['!props'] = { rtl: true };
