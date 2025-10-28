@@ -424,9 +424,11 @@
             const ws_all_scored = XLSX.utils.json_to_sheet(formattedAllScored, { cellDates: true });            
             
             // Set new sheets to RTL
-            ws_top7['!props'] = { rtl: true };
-            ws_all_scored['!props'] = { rtl: true };
-            
+            //ws_top7['!props'] = { rtl: true };
+            //ws_all_scored['!props'] = { rtl: true };
+            // Force RTL sheet direction (same as Excel's "Sheet Right-to-Left")
+            ws_top7['!views'] = [{ rightToLeft: true }];
+            ws_all_scored['!views'] = [{ rightToLeft: true }];
             // Create a new workbook
             const newWorkbook = XLSX.utils.book_new();
 
