@@ -6,6 +6,8 @@
     <title>מנתח עסקאות נדל"ן</title>
     <!-- 1. Include Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 1.1 Include Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 2. Include SheetJS (xlsx.full.min.js) for reading/writing Excel files -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -42,7 +44,7 @@
 
         <!-- File Input -->
         <div class="mb-4">
-            <label for="file-upload" class="block text-sm font-medium text-gray-700 mb-2">בחר קובץ אקסל:</label>
+            <label for="file-upload" class="block text-sm font-medium text-gray-700 mb-2"><i class="fa-solid fa-file-excel text-green-600 ml-2" aria-hidden="true"></i>בחר קובץ אקסל:</label>
             <input id="file-upload" type="file"
                    accept=".xlsx, .xls, .xlsm"
                    class="block w-full text-sm text-gray-500
@@ -54,12 +56,12 @@
 
         <!-- Process Button -->
         <button id="process-button" class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 transition duration-300">
-            נתח וסנן עסקאות
+            <i class="fa-solid fa-magnifying-glass-chart ml-2" aria-hidden="true"></i> נתח וסנן עסקאות
         </button>
 
         <!-- Loader (hidden by default) -->
         <div id="loader" class="flex justify-center items-center mt-6 hidden">
-            <div class="spinner"></div>
+            <i class="fa-solid fa-spinner fa-spin text-blue-600 text-2xl ml-2" aria-hidden="true"></i>
             <span class="mr-4 text-gray-700">מעבד נתונים...</span>
         </div>
 
@@ -452,12 +454,12 @@
         // --- UI Helper Functions ---
 
         function showError(message) {
-            messageEl.textContent = message;
+            messageEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation ml-2" aria-hidden="true"></i>' + message;
             messageEl.className = 'mt-4 text-center text-sm font-medium text-red-600';
         }
         
         function showSuccess(message) {
-            messageEl.textContent = message;
+            messageEl.innerHTML = '<i class="fa-solid fa-circle-check ml-2" aria-hidden="true"></i>' + message;
             messageEl.className = 'mt-4 text-center text-sm font-medium text-green-600';
         }
 
